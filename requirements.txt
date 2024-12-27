@@ -1,0 +1,6 @@
+pydantic-ai
+feedparser
+langdetect
+keybert
+textblob
+sentence-transformers
