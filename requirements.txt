@@ -4,3 +4,5 @@ langdetect
 keybert
 textblob
 sentence-transformers
+python-dotenv 
+nest_asyncio
