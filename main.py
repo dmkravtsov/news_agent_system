@@ -9,12 +9,15 @@ from pydantic_ai import RunContext
 # Списки RSS-источников для разных регионов
 RSS_URL_WORLD = "https://feeds.bbci.co.uk/news/world/rss.xml"
 RSS_URL_ASIA = "https://feeds.bbci.co.uk/news/world/asia/rss.xml"
+# RSS_URL_ARXIV = 'https://arxiv.org/rss/cs.AI+cs.LG+stat.ML'
+
 
 async def main():
     # Создание агентов
     print("Создаём агенты для сбора новостей...")
     collector_world = CollectorAgent(region="World", source_urls=[RSS_URL_WORLD])
     collector_asia = CollectorAgent(region="Asia", source_urls=[RSS_URL_ASIA])
+    # collector_asia = CollectorAgent(region="Arxiv", source_urls=[RSS_URL_ARXIV])
     manager_agent = ManagerAgent()
     writer_agent = WriterAgent()
     print("Агенты успешно созданы.")

@@ -6,6 +6,10 @@ from langdetect import detect
 from textblob import TextBlob
 import nltk
 
+from sklearn.metrics.pairwise import cosine_similarity
+from sentence_transformers import SentenceTransformer
+import numpy as np
+
 # Загрузка необходимых пакетов NLTK
 nltk.download('stopwords')
 nltk.download('punkt')
@@ -14,6 +18,7 @@ class ManagerAgent(Agent[List[NewsItem], List[NewsItem]]):
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
         self.keybert_model = KeyBERT()
+        self.embedding_model = SentenceTransformer('all-MiniLM-L6-v2')  # Используем SentenceTransformer для векторизации текста
 
     async def filter_and_analyze(self, ctx: RunContext[List[NewsItem]]) -> List[NewsItem]:
         # print("Inside filter_and_analyze method...")
@@ -39,10 +44,60 @@ class ManagerAgent(Agent[List[NewsItem], List[NewsItem]]):
         print(f"Removed duplicates, {len(filtered)} items remain.")
         return filtered
 
+    # async def tool_semantic_filter(self, ctx: RunContext[List[NewsItem]], news_list: List[NewsItem]) -> List[NewsItem]:
+    #     print("Starting semantic filtering...")
+    #     # Semantic filtering логика может быть упрощена или удалена, если не нужна
+    #     return news_list
     async def tool_semantic_filter(self, ctx: RunContext[List[NewsItem]], news_list: List[NewsItem]) -> List[NewsItem]:
         print("Starting semantic filtering...")
-        # Semantic filtering логика может быть упрощена или удалена, если не нужна
-        return news_list
+        if not news_list:
+            return []
+
+        # Объединяем тайтлы и описания для каждой новости
+        texts = [f"{item.title} {item.description}" for item in news_list]
+
+        # Генерируем векторы для текстов
+        embeddings = self.embedding_model.encode(texts)
+
+        # Матрица сходства
+        similarity_matrix = cosine_similarity(embeddings)
+
+        # Порог для объединения новостей
+        threshold = 0.25
+        grouped_indices = set()
+        grouped_news = []
+
+        for i, row in enumerate(similarity_matrix):
+            if i in grouped_indices:
+                continue
+
+            group = [i]
+            for j, similarity in enumerate(row):
+                if i != j and similarity >= threshold and j not in grouped_indices:
+                    group.append(j)
+
+            grouped_indices.update(group)
+
+            # Объединяем новости в группе
+            merged_title = "; ".join(news_list[idx].title for idx in group)
+            merged_description = " ".join(news_list[idx].description for idx in group)
+
+            grouped_news.append(NewsItem(
+                source=news_list[group[0]].source,  # Берём источник первой новости в группе
+                title=merged_title,
+                description=merged_description,
+                full_text=news_list[group[0]].full_text,
+                date=news_list[group[0]].date,
+                region=news_list[group[0]].region,
+                url=news_list[group[0]].url,
+                tags=news_list[group[0]].tags,
+                category=news_list[group[0]].category,
+                language=news_list[group[0]].language,
+                sentiment=news_list[group[0]].sentiment
+            ))
+
+        print(f"Semantic filtering completed. Reduced to {len(grouped_news)} items.")
+        return grouped_news
 
     async def tool_fill_missing_attributes(self, ctx: RunContext[List[NewsItem]], news_list: List[NewsItem]) -> List[NewsItem]:
         print("Filling missing attributes...")
