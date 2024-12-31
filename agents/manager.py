@@ -1,69 +1,78 @@
-from keybert import KeyBERT
-from pydantic_ai import Agent, RunContext
+from base_agent import BaseAgent
 from typing import List
 from data_models import NewsItem
+from sentence_transformers import SentenceTransformer
+from sklearn.metrics.pairwise import cosine_similarity
+from keybert import KeyBERT
 from langdetect import detect
 from textblob import TextBlob
-import nltk
 
-from sklearn.metrics.pairwise import cosine_similarity
-from sentence_transformers import SentenceTransformer
-import numpy as np
+class ManagerAgent(BaseAgent):
+    """
+    Агент-менеджер для обработки новостей.
+    Выполняет задачи: удаление дубликатов, объединение схожих новостей,
+    определение тональности и заполнение отсутствующих атрибутов.
+    """
 
-# Загрузка необходимых пакетов NLTK
-nltk.download('stopwords')
-nltk.download('punkt')
+    def __init__(self):
+        super().__init__(name="ManagerAgent")
+        self.keybert_model = KeyBERT()  # Модель для извлечения ключевых слов
+        self.embedding_model = SentenceTransformer('all-MiniLM-L6-v2')  # Модель для генерации эмбеддингов
 
-class ManagerAgent(Agent[List[NewsItem], List[NewsItem]]):
-    def __init__(self, *args, **kwargs):
-        super().__init__(*args, **kwargs)
-        self.keybert_model = KeyBERT()
-        self.embedding_model = SentenceTransformer('all-MiniLM-L6-v2')  # Используем SentenceTransformer для векторизации текста
+    async def process(self, data: List[NewsItem]) -> List[NewsItem]:
+        """
+        Основной метод обработки данных.
 
-    async def filter_and_analyze(self, ctx: RunContext[List[NewsItem]]) -> List[NewsItem]:
-        # print("Inside filter_and_analyze method...")
-        # print(f"Context: {ctx}")
-        try:
-            result = await self.tool_remove_duplicates(ctx)
-            result = await self.tool_semantic_filter(ctx, result)
-            result = await self.tool_fill_missing_attributes(ctx, result)
-            return result
-        except Exception as e:
-            print(f"Error in filter_and_analyze: {e}")
-            raise e
+        :param data: Список новостей для обработки.
+        :return: Обработанный список новостей.
+        """
+        await self.log("Starting news processing...")
 
-    async def tool_remove_duplicates(self, ctx: RunContext[List[NewsItem]]) -> List[NewsItem]:
-        news_list = ctx.messages
-        print(f"Removing duplicates from {len(news_list)} items...")
+        # Удаление дубликатов
+        data = await self.remove_duplicates(data)
+
+        # Семантическое объединение схожих новостей
+        data = await self.semantic_filter(data)
+
+        # Заполнение отсутствующих атрибутов
+        data = await self.fill_missing_attributes(data)
+
+        await self.log("News processing completed.")
+        return data
+
+    async def remove_duplicates(self, news_list: List[NewsItem]) -> List[NewsItem]:
+        """
+        Удаляет дубликаты новостей на основе заголовков.
+
+        :param news_list: Список новостей.
+        :return: Список новостей без дубликатов.
+        """
         unique_titles = set()
         filtered = []
         for item in news_list:
             if item.title not in unique_titles:
                 unique_titles.add(item.title)
                 filtered.append(item)
-        print(f"Removed duplicates, {len(filtered)} items remain.")
+        await self.log(f"Removed duplicates: {len(news_list) - len(filtered)} duplicates found.")
         return filtered
 
-    # async def tool_semantic_filter(self, ctx: RunContext[List[NewsItem]], news_list: List[NewsItem]) -> List[NewsItem]:
-    #     print("Starting semantic filtering...")
-    #     # Semantic filtering логика может быть упрощена или удалена, если не нужна
-    #     return news_list
-    async def tool_semantic_filter(self, ctx: RunContext[List[NewsItem]], news_list: List[NewsItem]) -> List[NewsItem]:
-        print("Starting semantic filtering...")
+    async def semantic_filter(self, news_list: List[NewsItem]) -> List[NewsItem]:
+        """
+        Объединяет схожие по смыслу новости в группы.
+
+        :param news_list: Список новостей.
+        :return: Обработанный список новостей.
+        """
         if not news_list:
             return []
 
-        # Объединяем тайтлы и описания для каждой новости
+        # Создание эмбеддингов для текстов
         texts = [f"{item.title} {item.description}" for item in news_list]
-
-        # Генерируем векторы для текстов
         embeddings = self.embedding_model.encode(texts)
 
         # Матрица сходства
         similarity_matrix = cosine_similarity(embeddings)
-
-        # Порог для объединения новостей
-        threshold = 0.25
+        threshold = 0.3  # Порог сходства
         grouped_indices = set()
         grouped_news = []
 
@@ -78,12 +87,12 @@ class ManagerAgent(Agent[List[NewsItem], List[NewsItem]]):
 
             grouped_indices.update(group)
 
-            # Объединяем новости в группе
+            # Объединение новостей в группу
             merged_title = "; ".join(news_list[idx].title for idx in group)
             merged_description = " ".join(news_list[idx].description for idx in group)
 
             grouped_news.append(NewsItem(
-                source=news_list[group[0]].source,  # Берём источник первой новости в группе
+                source=news_list[group[0]].source,
                 title=merged_title,
                 description=merged_description,
                 full_text=news_list[group[0]].full_text,
@@ -96,56 +105,47 @@ class ManagerAgent(Agent[List[NewsItem], List[NewsItem]]):
                 sentiment=news_list[group[0]].sentiment
             ))
 
-        print(f"Semantic filtering completed. Reduced to {len(grouped_news)} items.")
+        await self.log(f"Semantic filtering completed. Reduced to {len(grouped_news)} items.")
         return grouped_news
 
-    async def tool_fill_missing_attributes(self, ctx: RunContext[List[NewsItem]], news_list: List[NewsItem]) -> List[NewsItem]:
-        print("Filling missing attributes...")
+    async def fill_missing_attributes(self, news_list: List[NewsItem]) -> List[NewsItem]:
+        """
+        Заполняет отсутствующие атрибуты для каждой новости.
+
+        :param news_list: Список новостей.
+        :return: Список новостей с заполненными атрибутами.
+        """
         for item in news_list:
-            if item.category is None:
+            # Определение категории
+            if not item.category:
                 title_lower = item.title.lower()
                 description_lower = item.description.lower()
-                if any(word in title_lower or description_lower for word in ["politics", "government", "election", "policy", "diplomacy"]):
+                if any(word in title_lower or description_lower for word in ["politics", "government", "election"]):
                     item.category = "Politics"
-                elif any(word in title_lower or description_lower for word in ["economy", "finance", "stock", "market", "business"]):
+                elif any(word in title_lower or description_lower for word in ["economy", "finance", "market"]):
                     item.category = "Economy"
-                elif any(word in title_lower or description_lower for word in ["weather", "climate", "storm", "rain", "forecast"]):
-                    item.category = "Weather"
-                elif any(word in title_lower or description_lower for word in ["sports", "football", "basketball", "tennis", "olympics"]):
-                    item.category = "Sports"
-                elif any(word in title_lower or description_lower for word in ["health", "medicine", "doctor", "hospital", "disease", "wellness"]):
-                    item.category = "Health"
                 else:
                     item.category = "General"
 
-            if item.language is None:
+            # Определение языка
+            if not item.language:
                 try:
                     item.language = detect(item.title)
-                except:
+                except Exception:
                     item.language = "unknown"
 
-            if item.sentiment is None:
-                sentiment = TextBlob(item.description).sentiment.polarity
-                item.sentiment = round(sentiment, 2)
+            # Определение тональности
+            if not item.sentiment:
+                item.sentiment = round(TextBlob(item.description).sentiment.polarity, 2)
 
-            if item.tags is None:
+            # Извлечение ключевых слов
+            if not item.tags:
                 text = f"{item.title} {item.description}"
                 keywords = self.keybert_model.extract_keywords(
-                    text,
-                    keyphrase_ngram_range=(1, 2),
-                    stop_words='english',
-                    top_n=5,
-                    use_maxsum=True,
-                    diversity=0.7
+                    text, keyphrase_ngram_range=(1, 2), stop_words='english', top_n=5
                 )
+                item.tags = [kw[0] for kw in keywords]
 
-
-                # Фильтруем слишком общие слова и фразы
-                item.tags = [
-                    kw[0] for kw in keywords if len(kw[0].split()) <= 2 and kw[0].lower() not in ['people', 'help', 'conditions']
-                ]
-
-
-        print("Attributes filling completed.")
+        await self.log("Attributes filling completed.")
         return news_list
 

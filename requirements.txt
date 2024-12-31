@@ -6,3 +6,4 @@ textblob
 sentence-transformers
 python-dotenv 
 nest_asyncio
+python-telegram-bot
