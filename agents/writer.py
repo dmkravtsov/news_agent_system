@@ -26,7 +26,7 @@ class WriterAgent(BaseAgent):
             ),
             system_prompt=(
                 "You are a professional summarizer. "
-                "Give reply in Russian."
+                "Give reply in Russian language."
                 "Group similar news items into one by merging their content and summarizing them concisely. "
                 "Ensure all key points are included and avoid repetition."
                 "The summary must be a numbered list where each item starts with a number followed by a period and a single space (e.g., '1. '), without additional line breaks between items."

@@ -9,14 +9,15 @@ from data_models import NewsItem, NewsDigest
 # Списки RSS-источников для разных регионов
 RSS_URL_WORLD = "https://feeds.bbci.co.uk/news/world/rss.xml"
 RSS_URL_ASIA = "https://feeds.bbci.co.uk/news/world/asia/rss.xml"
-#RSS_URL_ARXIV = 'https://arxiv.org/rss/cs.AI+cs.LG+stat.ML'
+RSS_URL_ARXIV = 'https://arxiv.org/rss/cs.AI+cs.LG+stat.ML'
 
 
 async def main():
     # Создание агентов
     print("Создаём агентов для сбора новостей...")
-    collector_world = CollectorAgent(region="World", source_urls=[RSS_URL_WORLD])
-    collector_asia = CollectorAgent(region="Asia", source_urls=[RSS_URL_ASIA])
+    collector_world = CollectorAgent(region="World", source_urls=[RSS_URL_WORLD], days_ago=0)
+    collector_asia = CollectorAgent(region="Asia", source_urls=[RSS_URL_ASIA],days_ago=0)
+    collector_arxiv = CollectorAgent(region="Arxiv", source_urls=[RSS_URL_ARXIV],days_ago=0)
     manager_agent = ManagerAgent()
     writer_agent = WriterAgent()
     publisher_agent = PublisherAgent()  # Новый агент для публикации
@@ -27,14 +28,18 @@ async def main():
         print("Начинаем сбор новостей...")
         news_world: List[NewsItem] = await collector_world.process()
         news_asia: List[NewsItem] = await collector_asia.process()
+        news_arxiv: List[NewsItem] = await collector_arxiv.process()
+
         print(f"Собрано {len(news_world)} новостей для региона World.")
         print(f"Собрано {len(news_asia)} новостей для региона Asia.")
+        print(f"Собрано {len(news_arxiv)} новостей для региона Asia.")
     except Exception as e:
         print(f"Error during news collection: {e}")
         return
 
     # Объединение новостей
-    all_news = news_world + news_asia
+    all_news = news_world + news_asia + news_arxiv
+
     print(f"Всего собрано {len(all_news)} новостей.")
 
     # Обработка новостей менеджером
