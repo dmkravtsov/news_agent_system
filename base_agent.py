@@ -1,31 +1,29 @@
+import logging
 from abc import ABC, abstractmethod
 from typing import Any, List
+from pydantic import BaseModel, ConfigDict
 
-class BaseAgent(ABC):
+class BaseAgent(BaseModel, ABC):
     """
     Базовый класс для всех агентов в проекте.
     Этот класс определяет общий интерфейс и базовую функциональность, 
-    которую могут переопределять дочерние классы.
+    которую могут использовать дочерние классы.
     """
 
-    def __init__(self, name: str = "BaseAgent"):
-        """
-        Инициализирует базовый агент с заданным именем.
+    model_config = ConfigDict(arbitrary_types_allowed=True)
 
-        :param name: Имя агента, используется для логирования.
-        """
-        self.name = name  # Устанавливаем имя агента
+    name: str = "BaseAgent"
+    logger: logging.Logger = logging.getLogger("BaseAgent")
 
     @abstractmethod
     async def process(self, data: Any) -> Any:
         """
-        Абстрактный метод для обработки данных.
-        Каждый агент должен реализовать эту функцию в своём классе.
+        Метод для обработки данных. Должен быть переопределён в дочерних классах.
 
         :param data: Входные данные для обработки.
         :return: Результат обработки данных.
         """
-        pass  # Этот метод должен быть переопределён в дочерних классах
+        pass
 
     async def log(self, message: str, level: str = "INFO") -> None:
         """
@@ -34,7 +32,8 @@ class BaseAgent(ABC):
         :param message: Сообщение для логирования.
         :param level: Уровень логирования (например, INFO, WARNING, ERROR).
         """
-        print(f"[{level}] {self.name}: {message}")  # Форматируем и выводим сообщение
+        log_method = getattr(self.logger, level.lower(), self.logger.info)
+        log_method(f"{self.name}: {message}")
 
     async def handle_error(self, error: Exception, context: Any = None) -> None:
         """
@@ -43,7 +42,6 @@ class BaseAgent(ABC):
         :param error: Исключение, которое произошло.
         :param context: Дополнительный контекст, связанный с исключением.
         """
-        # Логируем сообщение об ошибке с контекстом (если он есть)
         await self.log(f"Error: {error}. Context: {context}", level="ERROR")
 
     async def validate_data(self, data: List[Any]) -> bool:
@@ -54,7 +52,7 @@ class BaseAgent(ABC):
         :param data: Список данных для проверки.
         :return: True, если данные корректны, иначе False.
         """
-        if not data:  # Проверяем, переданы ли данные
-            await self.log("No data provided.", level="WARNING")  # Логируем предупреждение
-            return False  # Данные некорректны (их нет)
-        return True  # Данные корректны
+        if not isinstance(data, list) or not data:
+            await self.log("Invalid or empty data provided.", level="WARNING")
+            return False
+        return True

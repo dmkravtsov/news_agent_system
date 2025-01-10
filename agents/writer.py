@@ -4,6 +4,7 @@ from datetime import datetime
 from data_models import NewsItem, NewsDigest
 from pydantic_ai import Agent
 from pydantic_ai.models.openai import OpenAIModel
+from pydantic import Field, PrivateAttr
 import os
 import re
 from dotenv import load_dotenv
@@ -15,20 +16,22 @@ class WriterAgent(BaseAgent):
     """
     Агент-писатель для создания дайджестов новостей.
     """
+    max_sentences: int = Field(default=3, description="Максимальное количество предложений для описания")
+    _agent: Agent = PrivateAttr()
 
     def __init__(self, max_sentences: int = 3):
         super().__init__(name="WriterAgent")
-        self.max_sentences = max_sentences  # Гиперпараметр: количество предложений из описания
-        self.agent = Agent(
+        self.max_sentences = max_sentences
+        self._agent = Agent(
             model=OpenAIModel(
                 "gpt-3.5-turbo",
                 api_key=os.getenv("OPENAI_API_KEY")
             ),
             system_prompt=(
                 "You are a professional summarizer. "
-                "Give reply in Russian language."
-                "Group similar news items into one by merging their content and summarizing them concisely. "
-                "Ensure all key points are included and avoid repetition."
+                "Give reply in Russian language. "
+                "Group similar news items into one by merging their content and summarizing them concisely in 1 sentence. "
+                "Ensure all key points are included and avoid repetition. "
                 "The summary must be a numbered list where each item starts with a number followed by a period and a single space (e.g., '1. '), without additional line breaks between items."
             )
         )
@@ -47,7 +50,7 @@ class WriterAgent(BaseAgent):
         user_message = self._prepare_message(news_list)
 
         # Запрашиваем модель
-        response = await self.agent.run(user_message)
+        response = await self._agent.run(user_message)
 
         # Проверяем ответ
         if not response.data:

@@ -1,85 +1,31 @@
-# from base_agent import BaseAgent
-# from data_models import NewsItem
-# from datetime import datetime, timedelta
-# import feedparser
-# from typing import List
-
-
-# class CollectorAgent(BaseAgent):
-#     def __init__(self, region: str, source_urls: List[str]):
-#         super().__init__(name="CollectorAgent")
-#         self.region = region
-#         self.source_urls = source_urls
-#         self.yesterday_start = (datetime.now() - timedelta(days=1)).replace(hour=0, minute=0, second=0, microsecond=0)
-#         self.yesterday_end = datetime.now().replace(hour=0, minute=0, second=0, microsecond=0)
-
-#     async def process(self, data=None) -> List[NewsItem]:
-#         await self.log("Starting news collection...")
-#         all_items = []
-#         for url in self.source_urls:
-#             items = await self.tool_fetch_rss(url)
-#             all_items.extend(items)
-#         await self.log(f"Collected {len(all_items)} news items.")
-#         return all_items
-
-#     async def tool_fetch_rss(self, url: str) -> List[NewsItem]:
-#         feed = feedparser.parse(url)
-#         items = []
-#         for entry in feed.entries:
-#             try:
-#                 published_date = datetime(*entry.published_parsed[:6])
-#             except AttributeError:
-#                 continue
-
-#             if self.yesterday_start <= published_date < self.yesterday_end:
-#                 items.append(NewsItem(
-#                     source=feed.feed.title,
-#                     title=entry.title,
-#                     description=entry.summary,
-#                     full_text=entry.link,
-#                     date=published_date.strftime('%Y-%m-%d %H:%M:%S'),
-#                     region=self.region,
-#                     url=entry.link,
-#                 ))
-#         return items
-
+import logging
+from datetime import datetime, timedelta
+from typing import List, Dict, Any
+import aiohttp
+import feedparser
+from pydantic import Field
 from base_agent import BaseAgent
 from data_models import NewsItem
-from datetime import datetime, timedelta
-import feedparser
-from typing import List
 
 class CollectorAgent(BaseAgent):
-    def __init__(self, region: str, source_urls: List[str], days_ago: int = 0):
-        """
-        Инициализация агента для сбора новостей.
+    """
+    Агент для сбора данных из RSS-лент.
+    """
+    region: str = Field(..., description="Регион, для которого собираются новости")
+    source_urls: List[str] = Field(..., description="Список URL-источников")
+    days_ago: int = Field(default=0, description="Количество дней назад, за которые нужно собрать данные")
 
-        :param region: Регион, для которого собираются новости.
-        :param source_urls: Список URL-источников.
-        :param days_ago: Количество дней назад, за которые нужно собирать данные (включительно).
-        """
-        super().__init__(name="CollectorAgent")
-        self.region = region
-        self.source_urls = source_urls
-        self.days_ago = days_ago
-        self.start_date, self.end_date = self._calculate_date_range()
+    @property
+    def start_date(self) -> datetime:
+        return (datetime.now() - timedelta(days=self.days_ago)).replace(hour=0, minute=0, second=0, microsecond=0)
 
-    def _calculate_date_range(self):
-        """
-        Вычисляет временной диапазон на основе параметра days_ago.
-        days_ago=0 - только сегодня, =1 - сегодня и вчера
-        :return: (start_date, end_date) — начальная и конечная даты.
-        """
-        today = datetime.now().replace(hour=0, minute=0, second=0, microsecond=0)
-        start_date = today - timedelta(days=self.days_ago)
-        end_date = today + timedelta(days=1) - timedelta(seconds=1)  # Сегодня до конца дня
-        return start_date, end_date
+    @property
+    def end_date(self) -> datetime:
+        return datetime.now().replace(hour=23, minute=59, second=59, microsecond=999999)
 
-    async def process(self, data=None) -> List[NewsItem]:
+    async def process(self) -> List[NewsItem]:
         """
-        Собирает и фильтрует новости в указанном временном диапазоне.
-
-        :param data: Дополнительные данные (не используются).
+        Основной метод обработки данных.
         :return: Список объектов NewsItem.
         """
         await self.log("Starting news collection...")
@@ -87,33 +33,46 @@ class CollectorAgent(BaseAgent):
         for url in self.source_urls:
             items = await self.tool_fetch_rss(url)
             all_items.extend(items)
+
         await self.log(f"Collected {len(all_items)} news items.")
-        return all_items
+        # Преобразование словарей в объекты NewsItem
+        news_items = [NewsItem(**item) for item in all_items]
+        return news_items
 
-    async def tool_fetch_rss(self, url: str) -> List[NewsItem]:
+    async def tool_fetch_rss(self, url: str) -> List[Dict[str, Any]]:
         """
-        Парсит RSS-канал и фильтрует новости по временному диапазону.
+        Загружает RSS-ленту, обрабатывает и возвращает список новостей.
+        :param url: URL RSS-ленты.
+        :return: Список новостей в виде словарей.
+        """
+        headers = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)"}
+        try:
+            async with aiohttp.ClientSession() as session:
+                async with session.get(url, headers=headers) as response:
+                    response.raise_for_status()
+                    content = await response.read()
+                    feed = feedparser.parse(content)
+        except Exception as e:
+            await self.log(f"Error fetching RSS feed from {url}: {e}", level="WARNING")
+            return []
 
-        :param url: URL RSS-канала.
-        :return: Список объектов NewsItem.
-        """
-        feed = feedparser.parse(url)
         items = []
         for entry in feed.entries:
             try:
                 published_date = datetime(*entry.published_parsed[:6])
-            except AttributeError:
-                continue
-
-            # Фильтруем записи по диапазону дат
-            if self.start_date <= published_date <= self.end_date:
-                items.append(NewsItem(
-                    source=feed.feed.title,
-                    title=entry.title,
-                    description=entry.summary,
-                    full_text=entry.link,
-                    date=published_date.strftime('%Y-%m-%d %H:%M:%S'),
-                    region=self.region,
-                    url=entry.link,
-                ))
+                if self.start_date <= published_date <= self.end_date:
+                    items.append({
+                        "source": feed.feed.title,
+                        "title": entry.title,
+                        "description": entry.summary,
+                        "date": published_date,
+                        "region": self.region,
+                        "url": entry.link,
+                        "tags": [],
+                        "category": None,
+                        "language": None,
+                        "sentiment": None,
+                    })
+            except Exception as e:
+                await self.log(f"Error processing entry in {url}: {e}", level="WARNING")
         return items

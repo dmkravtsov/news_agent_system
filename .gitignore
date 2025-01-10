@@ -1,3 +1,7 @@
 __pycache__/
 venv/
 .env
+weather.py
+train_pydantic.ipynb
+test_rss.ipynb
+test_response.ipynb
